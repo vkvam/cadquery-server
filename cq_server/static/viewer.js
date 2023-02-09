@@ -136,6 +136,7 @@ function render(_data) {
 	if ( ! viewer) {
 		init_viewer(options, modules_name);
 	} else {
+		load_camera_position();
 		viewer.clear();
 	}
 
