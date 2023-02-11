@@ -1,6 +1,9 @@
 '''Module server: used to run the Flask web server.'''
 
 import json
+import queue
+import time
+import uuid
 from threading import Thread
 from queue import Queue
 from time import sleep
@@ -11,18 +14,16 @@ from flask import Flask, request, render_template, make_response, Response
 
 from .module_manager import ModuleManager
 
-
 WATCH_PERIOD = 0.3
-SSE_MESSAGE_TEMPLATE = 'event: file_update\ndata: %s\n\n'
-
+SSE_MESSAGE_TEMPLATE = 'event: file_update\ndata: {data}\nid: {id}\n\n'
 
 app = Flask(__name__, static_url_path='/static')
 
 
-def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: bool=False) -> None:
+def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: bool = False) -> None:
     '''Run the Flask web server.'''
 
-    @app.route('/', methods = [ 'GET' ])
+    @app.route('/', methods=['GET'])
     def _root() -> str:
         if module_manager.target_is_dir:
             module_manager.module_name = request.args.get('m')
@@ -34,7 +35,7 @@ def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: boo
             data=module_manager.get_data()
         )
 
-    @app.route('/html', methods = [ 'GET' ])
+    @app.route('/html', methods=['GET'])
     def _html() -> str:
         # pylint: disable=import-outside-toplevel
 
@@ -46,7 +47,7 @@ def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: boo
         exporter = Exporter(module_manager)
         return exporter.get_html(ui_options)
 
-    @app.route('/json', methods = [ 'GET' ])
+    @app.route('/json', methods=['GET'])
     def _json() -> Tuple[str, int]:
         if module_manager.target_is_dir:
             module_manager.module_name = request.args.get('m')
@@ -54,13 +55,21 @@ def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: boo
         data = module_manager.get_data()
         return data, (400 if 'error' in data else 200)
 
-    @app.route('/events', methods = [ 'GET' ])
+    @app.route('/events', methods=['GET'])
     def _events() -> Response:
+
         def stream():
+            c = 0
             while True:
-                data = events_queue.get()
-                print(f'Sending Server Sent Event: { data[:100] }...')
-                yield data
+                try:
+                    data = events_queue.get(block=True, timeout=1)
+                    print(f'Sending Server Sent Event: {len(data)}...')
+                    yield data
+                except queue.Empty:
+                    yield f"event: keep_alive\ndata: {c}\nid: {str(uuid.uuid4())}\n\n"
+                    if c % 100 == 0:
+                        print(f"{c}")
+                    c += 1
 
         response = make_response(stream())
         response.mimetype = 'text/event-stream'
@@ -75,10 +84,10 @@ def run(port: int, module_manager: ModuleManager, ui_options: dict, is_dead: boo
             if last_updated_file:
                 module_manager.module_name = op.basename(last_updated_file)[:-3]
                 data = module_manager.get_data()
-                events_queue.put(SSE_MESSAGE_TEMPLATE % json.dumps(data))
+                events_queue.put(SSE_MESSAGE_TEMPLATE.format(data=json.dumps(data), id=str(uuid.uuid4())))
             sleep(WATCH_PERIOD)
 
-    events_queue = Queue(maxsize = 3)
+    events_queue = Queue(maxsize=30)
     module_manager.init()
 
     if not is_dead:

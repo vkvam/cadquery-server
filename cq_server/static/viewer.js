@@ -9,17 +9,28 @@ let modules_name = [];
 let viewer = null;
 let timer = null;
 let sse = null;
-
+let storeNow = false;
+let slider0 = null;
+let slider1 = null;
+let slider2 = null;
 
 function init_sse() {
+
 	sse = new EventSource('events');
 	sse.addEventListener('file_update', event => {
+	    console.log("received");
 		render(JSON.parse(event.data));
+	    console.log("rendered");
 	})
+
+	sse.addEventListener('keep_alive', event => {
+	    console.log("keep_alive");
+	})
+
 	sse.onerror = error => {
-		if (sse.readyState == 2) {
-			setTimeout(init_sse, 1000);
-		}
+		/*if (sse.readyState == 2) {
+			setTimeout(init_sse, 200);
+		}*/
 	};	
 }
 
@@ -136,7 +147,24 @@ function render(_data) {
 	if ( ! viewer) {
 		init_viewer(options, modules_name);
 	} else {
-		load_camera_position();
+	    if(storeNow){
+            options.axes = viewer.axes;
+            options.axes0 = viewer.axes0;
+            options.grid = viewer.grid;
+            options.ortho = viewer.ortho;
+            options.transparent = viewer.transparent;
+            options.blackEdges = viewer.blackEdges;
+            options.collapse = viewer.collapse;
+
+            slider0 = viewer.getClipSlider(0);
+            slider1 = viewer.getClipSlider(1);
+            slider2 = viewer.getClipSlider(2);
+
+            load_camera_position();
+		}else{
+		    storeNow = true;
+		}
+
 		viewer.clear();
 	}
 
@@ -146,6 +174,11 @@ function render(_data) {
 		show_error();
 	} else if (data.module_name) {
 		show_model();
+        if(slider0 != null){
+            viewer.setClipSlider(0, slider0);
+            viewer.setClipSlider(1, slider1);
+            viewer.setClipSlider(2, slider2);
+        }
 	} else {
 		show_index();
 	}
